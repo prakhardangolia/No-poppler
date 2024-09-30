@@ -1,8 +1,7 @@
 streamlit
-pillow
-easyocr
 pytesseract
-numpy
-pandas
-PyMuPDF
+easyocr
 pdf2image
+Pillow
+pandas
+numpy
