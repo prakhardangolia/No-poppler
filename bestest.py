@@ -4,6 +4,7 @@ import fitz  # PyMuPDF
 import easyocr
 import os
 from PIL import Image
+import numpy as np
 
 # Initialize EasyOCR Reader
 reader = easyocr.Reader(['en'])
@@ -28,8 +29,11 @@ def extract_text_from_pdf_using_easyocr(pdf_file):
         pix = page.get_pixmap()
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         
+        # Convert the PIL Image to a NumPy array
+        img_np = np.array(img)
+
         # Use EasyOCR to extract text
-        text = extract_text_using_easyocr(img)
+        text = extract_text_using_easyocr(img_np)
         full_text += text + "\n"
 
     return full_text
