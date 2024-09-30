@@ -1,4 +1,5 @@
 import os
+import io
 import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter
 import easyocr
@@ -145,8 +146,13 @@ def main():
     pdf_file = st.file_uploader("Upload a PDF", type=["pdf"])
 
     if pdf_file is not None:
+        # Create a temporary directory for saving uploaded files
+        temp_dir = "temp_dir"
+        if not os.path.exists(temp_dir):
+            os.makedirs(temp_dir)  # Create the directory if it doesn't exist
+
         # Save the uploaded file temporarily
-        pdf_path = os.path.join("temp_dir", pdf_file.name)
+        pdf_path = os.path.join(temp_dir, pdf_file.name)
         with open(pdf_path, "wb") as f:
             f.write(pdf_file.getbuffer())
 
@@ -169,7 +175,7 @@ def main():
         passed, failed, absent, detained = process_data(data)
 
         # Generate Excel output path
-        output_path = os.path.join("temp_dir", "student-marks.xlsx")
+        output_path = os.path.join(temp_dir, "student-marks.xlsx")
         generate_excel(passed, failed, absent, detained, output_path)
 
         # Display DataFrames in the app
