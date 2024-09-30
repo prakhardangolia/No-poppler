@@ -1,12 +1,10 @@
-import streamlit as st
 import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter
 import easyocr
 import pandas as pd
 import re
-import pdf2image
+import fitz  # PyMuPDF
 import numpy as np
-import os
 
 # Initialize EasyOCR Reader
 reader = easyocr.Reader(['en'], gpu=False)
@@ -47,20 +45,29 @@ def extract_text_using_easyocr(image):
     full_text = " ".join([result[1] for result in results])
     return full_text
 
-# Function to convert PDF to images and use EasyOCR
+# Function to convert PDF to images using PyMuPDF
 def extract_text_from_pdf_using_easyocr(pdf_path):
-    images = pdf2image.convert_from_path(pdf_path)
+    images = extract_images_from_pdf(pdf_path)
     full_text = ""
     for image in images:
         text = extract_text_using_easyocr(image)
         full_text += text + "\n"
     return full_text
 
+# Function to extract images from PDF using PyMuPDF
+def extract_images_from_pdf(pdf_path):
+    images = []
+    with fitz.open(pdf_path) as pdf:
+        for page_num in range(len(pdf)):
+            page = pdf.load_page(page_num)
+            pix = page.get_pixmap()
+            image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            images.append(image)
+    return images
+
 # Function to extract data from text using regex
 def extract_data_from_text(text):
     data = []
-
-    # Regex pattern to handle roll numbers, names, and marks/status including decimals
     pattern = re.compile(r"(0801[A-Z\d]*[A-Z]?)\s+([A-Za-z\s]+?)(?:\s*\(.*?\))?\s+(\d+(\.\d+)?|A|None|Absent|abs|D)", re.IGNORECASE)
     matches = pattern.findall(text)
 
@@ -69,7 +76,6 @@ def extract_data_from_text(text):
         name = match[1].strip()
         marks_or_status = match[2].strip()
 
-        # Determine status
         if marks_or_status.lower() in ["a", "absent", "none", "abs"]:
             marks = None
             status = "Absent"
@@ -90,21 +96,12 @@ def extract_data_from_text(text):
 # Function to process the data
 def process_data(data):
     df = pd.DataFrame(data, columns=['Enrollment No', 'Name', 'Marks', 'Status'])
-
-    # Drop rows where 'Enrollment No' or 'Name' is missing
     df.dropna(subset=['Enrollment No', 'Name'], inplace=True)
-
-    # Handling status based on marks without modifying the decimal values
-    df.loc[(df['Marks'].notnull()) & (df['Marks'] >= 22), 'Status'] = 'Pass'  # 22 or higher is Pass
-    df.loc[(df['Marks'].notnull()) & (df['Marks'] < 22), 'Status'] = 'Fail'  # Less than 22 is Fail
-
-    # Create a 'Detained' column for those with 'Detained' status
+    df.loc[(df['Marks'].notnull()) & (df['Marks'] >= 22), 'Status'] = 'Pass'
+    df.loc[(df['Marks'].notnull()) & (df['Marks'] < 22), 'Status'] = 'Fail'
     df['Detained'] = df['Status'] == 'Detained'
-
-    # Update status for 'Absent'
     df['Status'] = df['Status'].fillna('Absent')
 
-    # Separate data into different categories
     passed = df[df['Status'] == 'Pass']
     failed = df[df['Status'] == 'Fail']
     absent = df[df['Status'] == 'Absent']
@@ -126,51 +123,40 @@ def generate_excel(passed, failed, absent, detained, output_path):
 
 # Main function
 def main():
-    st.title("PDF Text Extraction App")
-    
-    # Upload PDF file
-    uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
-    
-    if uploaded_file is not None:
-        # Save the uploaded file to a temporary location
-        pdf_path = "uploaded_pdf.pdf"  # Or use a more appropriate path as needed
-        with open(pdf_path, "wb") as f:
-            f.write(uploaded_file.read())
+    pdf_path = r'E:\programming\newtest\Discrete mid matks-output.pdf'  # Replace with your actual PDF path
+    output_path = r'E:\programming\newtest\student-marks.xlsx'
 
-        # Attempt to extract text from the PDF using EasyOCR
-        text = extract_text_from_pdf_using_easyocr(pdf_path)
+    text = extract_text_from_pdf_using_easyocr(pdf_path)
 
-        if not text.strip():
-            st.error("No data extracted. Please check the PDF format.")
-            return
+    if not text.strip():
+        print("No data extracted. Please check the PDF format.")
+        return
 
-        # Extract data using regex
-        data = extract_data_from_text(text)
+    data = extract_data_from_text(text)
 
-        # Display extracted data in Streamlit
-        st.write("Extracted Data:", data)
+    print("Extracted Data:\n", data)
 
-        passed, failed, absent, detained = process_data(data)
+    passed, failed, absent, detained = process_data(data)
 
-        # Display results in Streamlit
-        st.subheader("Results")
-        st.write("Passed Students:", passed)
-        st.write("Failed Students:", failed)
-        st.write("Absent Students:", absent)
-        st.write("Detained Students:", detained)
+    print("\nPassed Students:\n", passed)
+    print("\nFailed Students:\n", failed)
+    print("\nAbsent Students:\n", absent)
+    print("\nDetained Students:\n", detained)
 
-        # Generate Excel file (optional)
-        output_path = "student-marks.xlsx"  # Specify an output path
-        try:
-            generate_excel(passed, failed, absent, detained, output_path)
-            st.success("Excel file created successfully.")
-            st.download_button("Download Excel file", output_path)
-        except Exception as e:
-            st.error(f"Error creating Excel file: {e}")
+    total_students = len(pd.concat([passed, failed, absent, detained], ignore_index=True))
+    print(f"\nTotal number of students: {total_students}")
+    print(f"Number of students who passed: {len(passed)}")
+    print(f"Number of students who failed: {len(failed)}")
+    print(f"Number of students who were absent: {len(absent)}")
+    print(f"Number of students who were detained: {len(detained)}")
 
-        # Clean up the uploaded file
-        if os.path.exists(pdf_path):
-            os.remove(pdf_path)
+    try:
+        generate_excel(passed, failed, absent, detained, output_path)
+        print("Excel file created successfully.")
+    except PermissionError:
+        print(f"Permission denied: Unable to write to '{output_path}'. Ensure the file is not open and try again.")
+    except Exception as e:
+        print(f"Error creating Excel file: {e}")
 
 if __name__ == "__main__":
     main()
