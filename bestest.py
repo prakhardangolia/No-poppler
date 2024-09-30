@@ -1,55 +1,37 @@
 import streamlit as st
 import pandas as pd
-import fitz  # PyMuPDF
 import easyocr
-import os
-from PIL import Image
-import numpy as np
+from io import BytesIO
 
-# Initialize EasyOCR Reader
-reader = easyocr.Reader(['en'])
-
+# Function to extract text using EasyOCR
 def extract_text_using_easyocr(image):
-    """Extract text from the given image using EasyOCR."""
+    """Extract text from an image using EasyOCR."""
+    reader = easyocr.Reader(['en'])  # Create an EasyOCR reader
     result = reader.readtext(image)
     text = ''
-    for (bbox, text_part, prob) in result:
-        text += text_part + ' '
+    for (bbox, text, prob) in result:
+        text += f"{text}\n"  # Append the text
     return text.strip()
 
+# Function to extract text from PDF using EasyOCR
 def extract_text_from_pdf_using_easyocr(pdf_file):
-    """Extract text from a PDF file using PyMuPDF and EasyOCR."""
-    # Read the PDF file into bytes
-    pdf_bytes = pdf_file.read()  # Read the file content into bytes
-    doc = fitz.open("pdf", pdf_bytes)  # Open the PDF from bytes
-    full_text = ""
+    """Extract text from a PDF file using EasyOCR."""
+    images = []  # List to store extracted images
+    pdf_reader = fitz.open(pdf_file)  # Open the PDF file
+    for page in pdf_reader:
+        img = page.get_pixmap()  # Convert page to an image
+        img_bytes = img.tobytes()  # Convert image to bytes
+        images.append(img_bytes)  # Append the image bytes to the list
+    pdf_reader.close()  # Close the PDF file
 
-    for page_num in range(len(doc)):
-        page = doc.load_page(page_num)
-        pix = page.get_pixmap()
-        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        
-        # Convert the PIL Image to a NumPy array
-        img_np = np.array(img)
-
-        # Use EasyOCR to extract text
-        text = extract_text_using_easyocr(img_np)
-        full_text += text + "\n"
+    # Extract text from each image
+    full_text = ''
+    for img in images:
+        full_text += extract_text_using_easyocr(img)
 
     return full_text
 
-def generate_excel(passed, failed, absent, detained, output_path):
-    """Generate Excel files based on student data."""
-    with pd.ExcelWriter(output_path) as writer:
-        if not passed.empty:
-            passed.to_excel(writer, sheet_name='Passed', index=False)
-        if not failed.empty:
-            failed.to_excel(writer, sheet_name='Failed', index=False)
-        if not absent.empty:
-            absent.to_excel(writer, sheet_name='Absent', index=False)
-        if not detained.empty:
-            detained.to_excel(writer, sheet_name='Detained', index=False)
-
+# Function to process the extracted text
 def process_data(extracted_text):
     """Process the extracted text and classify students based on marks."""
     data = []
@@ -64,46 +46,57 @@ def process_data(extracted_text):
 
     df = pd.DataFrame(data, columns=['Name', 'Marks'])
 
+    # Convert 'Marks' to numeric, coercing errors to NaN
+    df['Marks'] = pd.to_numeric(df['Marks'], errors='coerce')
+
     # Classify students based on their marks
-    passed = df[df['Marks'].astype(str).str.isnumeric() & (df['Marks'].astype(int) > 21)]
-    failed = df[df['Marks'].astype(str).str.isnumeric() & (df['Marks'].astype(int) < 22)]
-    absent = df[df['Marks'] == 'A']
-    detained = df[df['Marks'] == 'D']
+    passed = df[df['Marks'] > 21]
+    failed = df[df['Marks'] < 22]
+    absent = df[df['Marks'].isna() & df['Marks'].astype(str).str.contains('A')]
+    detained = df[df['Marks'].isna() & df['Marks'].astype(str).str.contains('D')]
     
     return passed, failed, absent, detained
 
+# Function to generate Excel files based on the classified data
+def generate_excel(passed, failed, absent, detained, output_path):
+    """Generate Excel files for the classified data."""
+    with pd.ExcelWriter(output_path) as writer:
+        passed.to_excel(writer, sheet_name='Passed', index=False)
+        failed.to_excel(writer, sheet_name='Failed', index=False)
+        absent.to_excel(writer, sheet_name='Absent', index=False)
+        detained.to_excel(writer, sheet_name='Detained', index=False)
+
+# Main function to run the Streamlit app
 def main():
-    st.title("PDF to Excel Converter")
+    st.title("Student Marks Classification")
+    
     uploaded_file = st.file_uploader("Upload a PDF file", type=["pdf"])
     
-    if uploaded_file is not None:
-        # Extract text from the uploaded PDF
+    if uploaded_file:
         extracted_text = extract_text_from_pdf_using_easyocr(uploaded_file)
-
-        # Display extracted text
-        st.subheader("Extracted Text:")
-        st.text(extracted_text)
-
-        # Process data and generate Excel files
-        passed, failed, absent, detained = process_data(extracted_text)
-
-        # Show dataframes in the app
-        st.subheader("Passed Students")
-        st.dataframe(passed)
-        st.subheader("Failed Students")
-        st.dataframe(failed)
-        st.subheader("Absent Students")
-        st.dataframe(absent)
-        st.subheader("Detained Students")
-        st.dataframe(detained)
-
-        # Generate Excel files
-        output_path = "students_data.xlsx"
-        generate_excel(passed, failed, absent, detained, output_path)
+        st.text_area("Extracted Text", value=extracted_text, height=300)
         
-        # Allow user to download the generated Excel file
-        with open(output_path, "rb") as f:
-            st.download_button("Download Excel File", f, file_name=output_path)
+        passed, failed, absent, detained = process_data(extracted_text)
+        
+        # Display the results
+        st.subheader("Passed Students")
+        st.write(passed)
+        
+        st.subheader("Failed Students")
+        st.write(failed)
+        
+        st.subheader("Absent Students")
+        st.write(absent)
+        
+        st.subheader("Detained Students")
+        st.write(detained)
+        
+        # Generate and download Excel files
+        output_path = "student_marks_classification.xlsx"
+        if st.button("Generate Excel Files"):
+            generate_excel(passed, failed, absent, detained, output_path)
+            with open(output_path, "rb") as f:
+                st.download_button("Download Excel File", f, file_name=output_path)
 
 if __name__ == "__main__":
     main()
