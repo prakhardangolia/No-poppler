@@ -1,6 +1,4 @@
 streamlit
 pandas
-PyMuPDF
 easyocr
-Pillow
-openpyxl
+PyMuPDF
