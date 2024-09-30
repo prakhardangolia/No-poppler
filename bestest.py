@@ -33,7 +33,9 @@ def extract_text_using_easyocr(image):
 
 # Function to convert PDF to images and use EasyOCR
 def extract_text_from_pdf_using_easyocr(pdf_file):
-    doc = fitz.open(pdf_file)  # Open the PDF file
+    # Read the PDF file from the Streamlit uploader as bytes
+    pdf_bytes = pdf_file.read()  
+    doc = fitz.open("pdf", pdf_bytes)  # Open the PDF file from bytes
     full_text = ""
 
     for page in doc:
