@@ -18,7 +18,9 @@ def extract_text_using_easyocr(image):
 
 def extract_text_from_pdf_using_easyocr(pdf_file):
     """Extract text from a PDF file using PyMuPDF and EasyOCR."""
-    doc = fitz.open(pdf_file)
+    # Read the PDF file into bytes
+    pdf_bytes = pdf_file.read()  # Read the file content into bytes
+    doc = fitz.open("pdf", pdf_bytes)  # Open the PDF from bytes
     full_text = ""
 
     for page_num in range(len(doc)):
