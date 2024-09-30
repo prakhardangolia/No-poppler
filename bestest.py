@@ -4,6 +4,7 @@ from PIL import Image, ImageEnhance, ImageFilter
 import easyocr
 import pandas as pd
 import re
+import fitz  # PyMuPDF
 import numpy as np
 
 # Initialize EasyOCR Reader
@@ -28,6 +29,20 @@ def extract_text_using_easyocr(image):
     image_array = pil_image_to_numpy(preprocessed_image)  # Convert PIL Image to numpy array
     results = reader.readtext(image_array)  # Use EasyOCR to extract text
     full_text = " ".join([result[1] for result in results])
+    return full_text
+
+# Function to convert PDF to images and use EasyOCR
+def extract_text_from_pdf_using_easyocr(pdf_file):
+    doc = fitz.open(pdf_file)  # Open the PDF file
+    full_text = ""
+
+    for page in doc:
+        # Render page to image
+        pix = page.get_pixmap()
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        text = extract_text_using_easyocr(img)
+        full_text += text + "\n"
+    
     return full_text
 
 # Function to extract data from text using regex
@@ -94,12 +109,8 @@ def main():
     pdf_file = st.file_uploader("Upload PDF file", type=["pdf"])
 
     if pdf_file is not None:
-        images = pdf2image.convert_from_bytes(pdf_file.read())  # Convert PDF to images
-        full_text = ""
-
-        for image in images:
-            text = extract_text_using_easyocr(image)
-            full_text += text + "\n"
+        # Attempt to extract text from the PDF using EasyOCR
+        full_text = extract_text_from_pdf_using_easyocr(pdf_file)
 
         if not full_text.strip():
             st.warning("No data extracted. Please check the PDF format.")
