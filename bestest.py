@@ -1,10 +1,12 @@
+import streamlit as st
 import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter
 import easyocr
 import pandas as pd
 import re
-import fitz  # PyMuPDF
+import pdf2image
 import numpy as np
+import os
 
 # Initialize EasyOCR Reader
 reader = easyocr.Reader(['en'], gpu=False)
@@ -45,19 +47,9 @@ def extract_text_using_easyocr(image):
     full_text = " ".join([result[1] for result in results])
     return full_text
 
-# Function to extract images from PDF using PyMuPDF
-def extract_images_from_pdf(pdf_path):
-    images = []
-    with fitz.open(pdf_path) as pdf:
-        for page in pdf:
-            pix = page.get_pixmap()
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            images.append(img)
-    return images
-
-# Function to extract text from PDF using EasyOCR
+# Function to convert PDF to images and use EasyOCR
 def extract_text_from_pdf_using_easyocr(pdf_path):
-    images = extract_images_from_pdf(pdf_path)
+    images = pdf2image.convert_from_path(pdf_path)
     full_text = ""
     for image in images:
         text = extract_text_using_easyocr(image)
@@ -134,45 +126,51 @@ def generate_excel(passed, failed, absent, detained, output_path):
 
 # Main function
 def main():
-    pdf_path = r'E:\programming\newtest\Discrete mid matks-output.pdf'  # Replace with your actual PDF path
-    output_path = r'E:\programming\newtest\student-marks.xlsx'
+    st.title("PDF Text Extraction App")
+    
+    # Upload PDF file
+    uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
+    
+    if uploaded_file is not None:
+        # Save the uploaded file to a temporary location
+        pdf_path = "uploaded_pdf.pdf"  # Or use a more appropriate path as needed
+        with open(pdf_path, "wb") as f:
+            f.write(uploaded_file.read())
 
-    # Attempt to extract text from the PDF using EasyOCR
-    text = extract_text_from_pdf_using_easyocr(pdf_path)
+        # Attempt to extract text from the PDF using EasyOCR
+        text = extract_text_from_pdf_using_easyocr(pdf_path)
 
-    if not text.strip():
-        print("No data extracted. Please check the PDF format.")
-        return
+        if not text.strip():
+            st.error("No data extracted. Please check the PDF format.")
+            return
 
-    # Extract data using regex
-    data = extract_data_from_text(text)
+        # Extract data using regex
+        data = extract_data_from_text(text)
 
-    # Print extracted data for debugging
-    print("Extracted Data:\n", data)
+        # Display extracted data in Streamlit
+        st.write("Extracted Data:", data)
 
-    passed, failed, absent, detained = process_data(data)
+        passed, failed, absent, detained = process_data(data)
 
-    # Print DataFrames for debugging
-    print("\nPassed Students:\n", passed)
-    print("\nFailed Students:\n", failed)
-    print("\nAbsent Students:\n", absent)
-    print("\nDetained Students:\n", detained)
+        # Display results in Streamlit
+        st.subheader("Results")
+        st.write("Passed Students:", passed)
+        st.write("Failed Students:", failed)
+        st.write("Absent Students:", absent)
+        st.write("Detained Students:", detained)
 
-    # Count and print the number of students in each category
-    total_students = len(pd.concat([passed, failed, absent, detained], ignore_index=True))
-    print(f"\nTotal number of students: {total_students}")
-    print(f"Number of students who passed: {len(passed)}")
-    print(f"Number of students who failed: {len(failed)}")
-    print(f"Number of students who were absent: {len(absent)}")
-    print(f"Number of students who were detained: {len(detained)}")
+        # Generate Excel file (optional)
+        output_path = "student-marks.xlsx"  # Specify an output path
+        try:
+            generate_excel(passed, failed, absent, detained, output_path)
+            st.success("Excel file created successfully.")
+            st.download_button("Download Excel file", output_path)
+        except Exception as e:
+            st.error(f"Error creating Excel file: {e}")
 
-    try:
-        generate_excel(passed, failed, absent, detained, output_path)
-        print("Excel file created successfully.")
-    except PermissionError:
-        print(f"Permission denied: Unable to write to '{output_path}'. Ensure the file is not open and try again.")
-    except Exception as e:
-        print(f"Error creating Excel file: {e}")
+        # Clean up the uploaded file
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
 
 if __name__ == "__main__":
     main()
