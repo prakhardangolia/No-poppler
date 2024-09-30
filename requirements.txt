@@ -1,0 +1,6 @@
+easyocr
+pytesseract
+Pillow
+pandas
+numpy
+PyMuPDF
