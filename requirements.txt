@@ -1,6 +1,8 @@
 streamlit
-pandas
-easyocr
+pytesseract
 Pillow
-pymupdf
+easyocr
+pandas
+pdf2image
+numpy
 openpyxl
