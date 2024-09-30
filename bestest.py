@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import easyocr
+import fitz  # Importing fitz for PDF handling
 from io import BytesIO
 
 # Function to extract text using EasyOCR
