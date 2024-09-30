@@ -1,179 +1,103 @@
 import streamlit as st
-import pytesseract
-from PIL import Image, ImageEnhance, ImageFilter
-import easyocr
 import pandas as pd
-import re
-import pdf2image
-import numpy as np
+import fitz  # PyMuPDF
+import easyocr
+import os
+from PIL import Image
 
 # Initialize EasyOCR Reader
-reader = easyocr.Reader(['en'], gpu=False)
+reader = easyocr.Reader(['en'])
 
-# Function to preprocess images
-def preprocess_image(image):
-    # Convert to grayscale
-    image = image.convert('L')
-
-    # Enhance contrast
-    enhancer = ImageEnhance.Contrast(image)
-    image = enhancer.enhance(2)
-
-    # Apply a blur filter to reduce noise
-    image = image.filter(ImageFilter.MedianFilter(size=3))
-
-    # Sharpen the image to make text clearer
-    image = image.filter(ImageFilter.SHARPEN)
-
-    return image
-
-# Function to convert PIL Image to numpy array
-def pil_image_to_numpy(image):
-    return np.array(image)
-
-# Function to extract text from image using EasyOCR
 def extract_text_using_easyocr(image):
-    # Preprocess the image
-    preprocessed_image = preprocess_image(image)
+    """Extract text from the given image using EasyOCR."""
+    result = reader.readtext(image)
+    text = ''
+    for (bbox, text_part, prob) in result:
+        text += text_part + ' '
+    return text.strip()
 
-    # Convert PIL Image to numpy array
-    image_array = pil_image_to_numpy(preprocessed_image)
-
-    # Use EasyOCR to extract text
-    results = reader.readtext(image_array)
-
-    # Combine the text results
-    full_text = " ".join([result[1] for result in results])
-    return full_text
-
-# Function to convert PDF to images and use EasyOCR
 def extract_text_from_pdf_using_easyocr(pdf_file):
-    images = pdf2image.convert_from_bytes(pdf_file.read())  # Convert PDF to images
+    """Extract text from a PDF file using PyMuPDF and EasyOCR."""
+    doc = fitz.open(pdf_file)
     full_text = ""
-    for image in images:
-        text = extract_text_using_easyocr(image)
+
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)
+        pix = page.get_pixmap()
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        
+        # Use EasyOCR to extract text
+        text = extract_text_using_easyocr(img)
         full_text += text + "\n"
+
     return full_text
 
-# Function to extract data from text using regex
-def extract_data_from_text(text):
+def generate_excel(passed, failed, absent, detained, output_path):
+    """Generate Excel files based on student data."""
+    with pd.ExcelWriter(output_path) as writer:
+        if not passed.empty:
+            passed.to_excel(writer, sheet_name='Passed', index=False)
+        if not failed.empty:
+            failed.to_excel(writer, sheet_name='Failed', index=False)
+        if not absent.empty:
+            absent.to_excel(writer, sheet_name='Absent', index=False)
+        if not detained.empty:
+            detained.to_excel(writer, sheet_name='Detained', index=False)
+
+def process_data(extracted_text):
+    """Process the extracted text and classify students based on marks."""
     data = []
+    for line in extracted_text.strip().split('\n'):
+        try:
+            # Assuming data is in the format: Name, Marks
+            name, marks = line.rsplit(',', 1)
+            marks = marks.strip()
+            data.append((name.strip(), marks))
+        except ValueError:
+            continue  # Skip lines that don't match the expected format
 
-    # Regex pattern to handle roll numbers, names, and marks/status including decimals
-    pattern = re.compile(r"(0801[A-Z\d]*[A-Z]?)\s+([A-Za-z\s]+?)(?:\s*\(.*?\))?\s+(\d+(\.\d+)?|A|None|Absent|abs|D)", re.IGNORECASE)
-    matches = pattern.findall(text)
+    df = pd.DataFrame(data, columns=['Name', 'Marks'])
 
-    for match in matches:
-        enrollment_no = match[0].strip()
-        name = match[1].strip()
-        marks_or_status = match[2].strip()
-
-        # Determine status
-        if marks_or_status.lower() in ["a", "absent", "none", "abs"]:
-            marks = None
-            status = "Absent"
-        elif marks_or_status.lower() == "d":
-            marks = None
-            status = "Detained"
-        elif marks_or_status.replace(".", "").isdigit():
-            marks = float(marks_or_status)
-            status = "Present"
-        else:
-            marks = None
-            status = "Unknown"
-
-        data.append((enrollment_no, name, marks, status))
-
-    return data
-
-# Function to process the data
-def process_data(data):
-    df = pd.DataFrame(data, columns=['Enrollment No', 'Name', 'Marks', 'Status'])
-
-    # Drop rows where 'Enrollment No' or 'Name' is missing
-    df.dropna(subset=['Enrollment No', 'Name'], inplace=True)
-
-    # Handling status based on marks without modifying the decimal values
-    df.loc[(df['Marks'].notnull()) & (df['Marks'] >= 22), 'Status'] = 'Pass'  # 22 or higher is Pass
-    df.loc[(df['Marks'].notnull()) & (df['Marks'] < 22), 'Status'] = 'Fail'  # Less than 22 is Fail
-
-    # Create a 'Detained' column for those with 'Detained' status
-    df['Detained'] = df['Status'] == 'Detained'
-
-    # Update status for 'Absent'
-    df['Status'] = df['Status'].fillna('Absent')
-
-    # Separate data into different categories
-    passed = df[df['Status'] == 'Pass']
-    failed = df[df['Status'] == 'Fail']
-    absent = df[df['Status'] == 'Absent']
-    detained = df[df['Status'] == 'Detained']
-
+    # Classify students based on their marks
+    passed = df[df['Marks'].astype(str).str.isnumeric() & (df['Marks'].astype(int) > 21)]
+    failed = df[df['Marks'].astype(str).str.isnumeric() & (df['Marks'].astype(int) < 22)]
+    absent = df[df['Marks'] == 'A']
+    detained = df[df['Marks'] == 'D']
+    
     return passed, failed, absent, detained
 
-# Function to generate Excel sheets
-def generate_excel(passed, failed, absent, detained, output_path):
-    with pd.ExcelWriter(output_path) as writer:
-        # Flag to track if at least one sheet is created
-        sheet_created = False
-        
-        if not passed.empty:
-            passed.to_excel(writer, sheet_name="Passed Students", index=False)
-            sheet_created = True
-        if not failed.empty:
-            failed.to_excel(writer, sheet_name="Failed Students", index=False)
-            sheet_created = True
-        if not absent.empty:
-            absent.to_excel(writer, sheet_name="Absent Students", index=False)
-            sheet_created = True
-        if not detained.empty:
-            detained.to_excel(writer, sheet_name="Detained Students", index=False)
-            sheet_created = True
-
-        # Check if any sheets were created
-        if not sheet_created:
-            raise ValueError("No data to write to Excel. At least one sheet must be created.")
-
-# Streamlit UI
 def main():
-    st.title("Student Marks Extraction from PDF")
-
-    # File upload
-    pdf_file = st.file_uploader("Upload a PDF file", type=["pdf"])
+    st.title("PDF to Excel Converter")
+    uploaded_file = st.file_uploader("Upload a PDF file", type=["pdf"])
     
-    if pdf_file is not None:
-        # Attempt to extract text from the PDF using EasyOCR
-        try:
-            text = extract_text_from_pdf_using_easyocr(pdf_file)
-            
-            if not text.strip():
-                st.error("No data extracted. Please check the PDF format.")
-                return
+    if uploaded_file is not None:
+        # Extract text from the uploaded PDF
+        extracted_text = extract_text_from_pdf_using_easyocr(uploaded_file)
 
-            # Extract data using regex
-            data = extract_data_from_text(text)
+        # Display extracted text
+        st.subheader("Extracted Text:")
+        st.text(extracted_text)
 
-            # Process the data
-            passed, failed, absent, detained = process_data(data)
+        # Process data and generate Excel files
+        passed, failed, absent, detained = process_data(extracted_text)
 
-            # Count and display the number of students in each category
-            total_students = len(pd.concat([passed, failed, absent, detained], ignore_index=True))
-            st.write(f"Total number of students: {total_students}")
-            st.write(f"Number of students who passed: {len(passed)}")
-            st.write(f"Number of students who failed: {len(failed)}")
-            st.write(f"Number of students who were absent: {len(absent)}")
-            st.write(f"Number of students who were detained: {len(detained)}")
+        # Show dataframes in the app
+        st.subheader("Passed Students")
+        st.dataframe(passed)
+        st.subheader("Failed Students")
+        st.dataframe(failed)
+        st.subheader("Absent Students")
+        st.dataframe(absent)
+        st.subheader("Detained Students")
+        st.dataframe(detained)
 
-            # Generate Excel file
-            output_path = "student-marks.xlsx"
-            generate_excel(passed, failed, absent, detained, output_path)
-
-            # Provide download link for the Excel file
-            with open(output_path, "rb") as f:
-                st.download_button("Download Excel file", f, file_name="student-marks.xlsx")
-
-        except Exception as e:
-            st.error(f"An error occurred: {str(e)}")
+        # Generate Excel files
+        output_path = "students_data.xlsx"
+        generate_excel(passed, failed, absent, detained, output_path)
+        
+        # Allow user to download the generated Excel file
+        with open(output_path, "rb") as f:
+            st.download_button("Download Excel File", f, file_name=output_path)
 
 if __name__ == "__main__":
     main()
