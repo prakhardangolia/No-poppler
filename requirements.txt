@@ -1,7 +1,7 @@
 streamlit
 pytesseract
-easyocr
-pdf2image
 Pillow
+easyocr
 pandas
 numpy
+pdf2image
