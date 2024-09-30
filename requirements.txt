@@ -4,4 +4,4 @@ Pillow
 easyocr
 pandas
 numpy
-pdf2image
+PyMuPDF
